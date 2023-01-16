@@ -1,8 +1,9 @@
 import math
 
 
-def poly_function_maker(input_string):
-    coeffs = list(map(float, input_string.split()))
+def poly_function_maker(coeffs):
+    if isinstance(coeffs, str):
+        coeffs = list(map(float, coeffs.split()))
     def poly(x):
         val = 0
         for i in range(len(coeffs)):

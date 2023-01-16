@@ -4,42 +4,51 @@ import pyqtgraph as pg
 from PyQt5.QtWidgets import QApplication, QLabel, QMainWindow, QPushButton, QWidget, QFrame, QRadioButton, QVBoxLayout, QHBoxLayout
 from PyQt5 import QtCore, QtGui
 
-from utils import poly_function_maker
+from calculation.utils import poly_function_maker
 from widgets import InputWidget
 from typing import Callable
-from calculation import * 
+
+sys.path.append('./calculation')
+from calculation.de_fitting import DE
+
 
 
 class DEProgram(QMainWindow):
-    _n: int = None
+    _ux: Callable = None
+    _uhx: Callable = None
     _coeffs: tuple = None
     _coeff_bounds: tuple = None
     _noise_scale: int = None
+    _running: bool = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setup_ui_components()
 
-        self._coeffs, self._coeff_bounds, self._noise_scale = (5, -20, 5, 50, -20, -40), [[-10, 10] for _ in range(5)], 2
-        self._n = len(self._coeffs) - 1
-        # self.degree_input_frame.input_field.setText(str(self._n))
+        self._coeffs, self._coeff_bounds, self._noise_scale = (5, -20, 5, 50, -20, -40), [-50, 50], 2
+        self._nr_points, self._CP, self._F, self._max_iters, self._popsize = 40, 0.8, 0.5, 300, 100
         self.coeffs_input_frame.input_field.setText(' '.join(map(str, self._coeffs)))
-        self.coeff_bounds_input_frame.input_field.setText(' '.join('/'.join(map(str, item)) for item in self._coeff_bounds))
+        self.coeff_bounds_input_frame.input_field.setText(' '.join(map(str, self._coeff_bounds)))
         self.noise_std_input_frame.input_field.setText(str(self._noise_scale))
+        self.nr_points_input_frame.input_field.setText(str(self._nr_points))
+        self.crossover_probability_input_frame.input_field.setText(str(self._CP))
+        self.mutation_input_frame.input_field.setText(str(self._F))
+        self.iters_input_frame.input_field.setText(str(self._max_iters))
+        self.pop_size_input_frame.input_field.setText(str(self._popsize))
 
-        self.xs = np.linspace(-3, 3, 100)
+        self.xs = np.linspace(-3, 3, self._nr_points)
         self.draw_plots()
 
     def _draw_ux_graph(self):
         self.ux_graph.clear()
         self.ux_graph.showGrid(x=True, y=True)
-        self.ux_graph.setTitle(f'Original polynomial u_x', color=(255, 255, 255, 0), size='18pt')
+        self.ux_graph.setTitle(f'Original polynomial u(x)', color=(255, 255, 255), size='18pt')
         
         if not self._ux:
             return
 
-        self._ys_clean = np.array(list(map(self._ux, self.xs)))
-        self._ys_noisy = self._ys_clean + np.random.uniform(-self._noise_scale // 2, self._noise_scale // 2, size=len(self.xs))
+        self._ys_clean = self._ux(self.xs)
+        self._ys_noisy = self._ys_clean + self._noise
         self.ux_graph.plot(self.xs, self._ys_clean)
 
         scatter = pg.ScatterPlotItem(size=10, brush=pg.mkBrush(255, 255, 255, 120))
@@ -48,54 +57,75 @@ class DEProgram(QMainWindow):
         # adding points to the scatter plot
         scatter.addPoints(spots)
         self.ux_graph.addItem(scatter)
-        # print(self.ux_graph.getPlotItem())
-
-        # pen = pg.mkPen(color=(255, 0, 0))
-        # self.ux_graph.plot(self.xs, list(map(fx, self.xs)), pen=pen)
 
     def _draw_ux_approx_graph(self):
-        return NotImplemented
         self.ux_approx_graph.clear()
         self.ux_approx_graph.showGrid(x=True, y=True)
-        self.ux_approx_graph.setTitle(f'Approximation of u_h', color=(255, 255, 255, 0), size='18pt')
-        if not (self._n and self._uhx):
+        self.ux_approx_graph.setTitle(f'Polynomial u(x) fitted with DE', color=(255, 255, 255), size='18pt')
+        if not self._uhx:
             return
 
         self.ux_approx_graph.plot(self.xs, list(map(self._uhx, self.xs)))
 
+        scatter = pg.ScatterPlotItem(size=10, brush=pg.mkBrush(255, 255, 255, 120))
+        spots = [{'pos': (self.xs[i], self._ys_noisy[i]), 'data': 1} for i in range(len(self.xs))]
+ 
+        # adding points to the scatter plot
+        scatter.addPoints(spots)
+        self.ux_approx_graph.addItem(scatter)
+
     def draw_plots(self):
         self._draw_ux_graph()
-        # self._draw_ux_approx_graph()
+        self._draw_ux_approx_graph()
 
     def validate_input_params(self):
         try:
             params = (
-                # self.degree_input_frame.input_field.text(),
+                self.nr_points_input_frame.input_field.text(),
+                self.crossover_probability_input_frame.input_field.text(),
+                self.mutation_input_frame.input_field.text(),
+                self.iters_input_frame.input_field.text(),
                 self.coeffs_input_frame.input_field.text(),
                 self.coeff_bounds_input_frame.input_field.text(),
+                self.pop_size_input_frame.input_field.text(),
                 self.noise_std_input_frame.input_field.text(),
             )
-
+            if self._running:
+                return
             if not all(params):
                 raise Exception('Please enter all required fields')
             
-            coeffs, coeff_bounds, noise_std = params
+            nr_points, CP, F, max_iters, coeffs, coeff_bounds, popsize, noise_std = params
+            self._nr_points, self._CP, self._F, self._max_iters, self._popsize = int(nr_points), float(CP), float(F), int(max_iters), int(popsize)
+
             self._coeffs, self._ux = poly_function_maker(coeffs)
-            self._coeff_bounds = [list(map(float, item.split('/')) for item in coeff_bounds.split(' '))]
-            self._noise_scale = float(noise_std)
+            self._coeff_bounds = list(map(float, coeff_bounds.split(' ')))
             self.error_label.setText('')
+
+            self.xs = np.linspace(-3, 3, self._nr_points)
+            self._noise_scale = float(noise_std)
+            self._noise = np.random.uniform(-self._noise_scale // 2, self._noise_scale // 2, size=len(self.xs))
         except Exception as ex:
             print(ex)
             self.error_label.setText(str(ex))
 
     def find_approx(self):
         try:
-            # self.error_frame.input_field.setText(str(round(uhx_norm1, 5)))
-            # self.iters_frame.input_field.setText(str(round(uhx_norm2, 5)))
-            # self.err_norm_frame.input_field.setText(str(round(e_norm, 5)))
-            self.draw_plots()
+            self._running = True
+            self._draw_ux_graph()
+            for it, solution_coeffs, best_obj in DE(self._popsize, self._CP, self._F, self._max_iters, self._coeff_bounds, 
+                                                      self.xs, self._ys_noisy, len(self._coeffs), verbose=True):
+                self._solution_coeffs, self._uhx = poly_function_maker(solution_coeffs)
+                self.error_frame.input_field.setText(str(round(best_obj, 4)))
+                self.iters_frame.input_field.setText(str(it))
+                self._draw_ux_approx_graph()
+                QtCore.QCoreApplication.processEvents()
+            self.iters_frame.input_field.setText(str(self._max_iters))
+            self._draw_ux_approx_graph()
         except Exception as ex:
             self.error_label.setText(f'Unable to plot functions: {ex}')
+        finally:
+            self._running = False
 
     def setup_ui_components(self):
         self.setWindowTitle('Approximating Polynomials Using Differential Evolution')
@@ -121,6 +151,10 @@ class DEProgram(QMainWindow):
         self.config_frame_layout.setAlignment(QtCore.Qt.AlignCenter)
         self.config_frame_layout.setContentsMargins(0, 0, 0, 0)
 
+        self.nr_points_input_frame = InputWidget(self.config_frame, 'Nr points:')
+        self.nr_points_input_frame.input_field.textChanged.connect(self.validate_input_params)
+        self.config_frame_layout.addWidget(self.nr_points_input_frame)
+
         self.coeffs_input_frame = InputWidget(self.config_frame, 'Poly coefficients:')
         self.coeffs_input_frame.input_field.textChanged.connect(self.validate_input_params)
         self.config_frame_layout.addWidget(self.coeffs_input_frame)
@@ -128,6 +162,22 @@ class DEProgram(QMainWindow):
         self.coeff_bounds_input_frame = InputWidget(self.config_frame, 'Coeff bounds:')
         self.coeff_bounds_input_frame.input_field.textChanged.connect(self.validate_input_params)
         self.config_frame_layout.addWidget(self.coeff_bounds_input_frame)
+
+        self.pop_size_input_frame = InputWidget(self.config_frame, 'Population size:')
+        self.pop_size_input_frame.input_field.textChanged.connect(self.validate_input_params)
+        self.config_frame_layout.addWidget(self.pop_size_input_frame)
+
+        self.crossover_probability_input_frame = InputWidget(self.config_frame, 'Crossover probability:')
+        self.crossover_probability_input_frame.input_field.textChanged.connect(self.validate_input_params)
+        self.config_frame_layout.addWidget(self.crossover_probability_input_frame)
+
+        self.mutation_input_frame = InputWidget(self.config_frame, 'Mutation:')
+        self.mutation_input_frame.input_field.textChanged.connect(self.validate_input_params)
+        self.config_frame_layout.addWidget(self.mutation_input_frame)
+
+        self.iters_input_frame = InputWidget(self.config_frame, 'Nr iterations:')
+        self.iters_input_frame.input_field.textChanged.connect(self.validate_input_params)
+        self.config_frame_layout.addWidget(self.iters_input_frame)
 
         self.noise_std_input_frame = InputWidget(self.config_frame, 'Noise std:')
         self.noise_std_input_frame.input_field.textChanged.connect(self.validate_input_params)
@@ -156,6 +206,10 @@ class DEProgram(QMainWindow):
         self.output_frame_layout.addWidget(self.error_frame)
 
         self.iters_frame = InputWidget(self.output_frame, 'Number of iters', enabled=False)
+        self.iters_frame.setFixedHeight(30)
+        self.output_frame_layout.addWidget(self.iters_frame)
+
+        self.iters_frame = InputWidget(self.output_frame, 'Fitted coefficients', enabled=False)
         self.iters_frame.setFixedHeight(30)
         self.output_frame_layout.addWidget(self.iters_frame)
 
