@@ -118,8 +118,10 @@ class DEProgram(QMainWindow):
                 self._solution_coeffs, self._uhx = poly_function_maker(solution_coeffs)
                 self.error_frame.input_field.setText(str(round(best_obj, 4)))
                 self.iters_frame.input_field.setText(str(it))
+                self.fitted_coeffs_frame.input_field.setText(str(' '.join(map(str, solution_coeffs.round(3).tolist()))))
                 self._draw_ux_approx_graph()
                 QtCore.QCoreApplication.processEvents()
+            self.fitted_coeffs_frame.input_field.setText(str(' '.join(map(str, solution_coeffs.round(3).tolist()))))
             self.iters_frame.input_field.setText(str(self._max_iters))
             self._draw_ux_approx_graph()
         except Exception as ex:
@@ -209,9 +211,9 @@ class DEProgram(QMainWindow):
         self.iters_frame.setFixedHeight(30)
         self.output_frame_layout.addWidget(self.iters_frame)
 
-        self.iters_frame = InputWidget(self.output_frame, 'Fitted coefficients', enabled=False)
-        self.iters_frame.setFixedHeight(30)
-        self.output_frame_layout.addWidget(self.iters_frame)
+        self.fitted_coeffs_frame = InputWidget(self.output_frame, 'Fitted coefficients', enabled=False)
+        self.fitted_coeffs_frame.setFixedHeight(30)
+        self.output_frame_layout.addWidget(self.fitted_coeffs_frame)
 
         # self.err_norm_frame = InputWidget(self.output_frame, 'Норма функції похибки', enabled=False)
         # self.err_norm_frame.setFixedHeight(30)
